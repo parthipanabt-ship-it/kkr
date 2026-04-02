@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KKR AI Sensor Dashboard</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f0c29; color: white; margin: 0; padding: 20px; }
+        h1 { color: #00d2ff; }
+        .container { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; max-width: 1000px; margin: auto; }
+        .card { background: rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 15px; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+        .label { font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px; color: #aaa; }
+        .value { font-size: 2.5em; font-weight: bold; margin: 10px 0; color: #00ff88; }
+        #ai-status { margin-top: 30px; padding: 15px; background: #1a1a2e; border-radius: 10px; display: inline-block; }
+        .listening { color: #ff0055; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+
+    <center>
+        <h1>KKR Smart Monitor</h1>
+        <p id="net-status">Connecting to MQTT...</p>
+
+        <div class="container">
+            <div class="card"><div class="label">Temperature</div><div id="T" class="value">--</div><span>°C</span></div>
+            <div class="card"><div class="label">Humidity</div><div id="H" class="value">--</div><span>%</span></div>
+            <div class="card"><div class="label">Pressure (BMP)</div><div id="P" class="value">--</div><span>hPa</span></div>
+            <div class="card"><div class="label">Object Count</div><div id="Cnt" class="value">0</div><span>Units</span></div>
+            <div class="card"><div class="label">Voltage</div><div id="V" class="value">--</div><span>V</span></div>
+        </div>
+
+        <div id="ai-status">
+            Voice Assistant: <strong id="voice-word">Initializing...</strong><br>
+            <small>Say <b>"GO"</b> to hear the sensor report</small>
+        </div>
+    </center>
+
+    <script>
+        // --- SETTINGS ---
+        const MQTT_BROKER = "wss://broker.hivemq.com:8884/mqtt";
+        const TOPIC = "kkr/sensors/data"; // Unique topic for your repo
+        
+        const client = mqtt.connect(MQTT_BROKER);
+        let sensors = { T: 0, H: 0, P: 0, Cnt: 0, V: 0 };
+
+        client.on('connect', () => {
+            document.getElementById('net-status').innerText = "Connected to HiveMQ";
+            client.subscribe(TOPIC);
+        });
+
+        client.on('message', (topic, message) => {
+            const data = message.toString();
+            // Data format expected: Cnt:5,V:12.42,A:0.55,T:24.0,H:45.0,Pres:1013.2
+            const pairs = data.split(',');
+            pairs.forEach(pair => {
+                const [key, val] = pair.split(':');
+                if (document.getElementById(key)) {
+                    document.getElementById(key).innerText = val;
+                    sensors[key] = val;
+                }
+            });
+        });
+
+        // --- TENSORFLOW.JS VOICE ---
+        async function initAI() {
+            const recognizer = speechCommands.create("BROWSER_FFT");
+            await recognizer.ensureModelLoaded();
+            document.getElementById('voice-word').innerText = "Listening...";
+            document.getElementById('voice-word').classList.add('listening');
+
+            recognizer.listen(result => {
+                const labels = recognizer.wordLabels();
+                const index = result.scores.indexOf(Math.max(...result.scores));
+                const word = labels[index];
+                
+                if (word === "go" && result.scores[index] > 0.80) {
+                    const speech = new SpeechSynthesisUtterance(
+                        `KKR system report. Temperature is ${sensors.T} degrees. Pressure is ${sensors.P} hectopascals. Current count is ${sensors.Cnt}.`
+                    );
+                    window.speechSynthesis.speak(speech);
+                }
+            }, { probabilityThreshold: 0.85 });
+        }
+
+        // Start AI after a user click (Browser security requirement)
+        window.onclick = () => { if(document.getElementById('voice-word').innerText === "Initializing...") initAI(); };
+    </script>
+</body>
+</html>
